@@ -1,0 +1,256 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  TRAINER
+  ADMIN
+}
+
+enum BatchStatus {
+  PLANNED
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  DROPPED
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  REVIEWED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+model User {
+  id                 String            @id @default(cuid())
+  fullName           String
+  email              String            @unique
+  passwordHash       String
+  role               UserRole          @default(STUDENT)
+  profileImage       String?
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  batchesAsTrainer   Batch[]           @relation("BatchTrainer")
+  lessonsCreated     Lesson[]          @relation("LessonTrainer")
+  assignmentsCreated Assignment[]      @relation("AssignmentTrainer")
+  enrollments        Enrollment[]
+  submissions        Submission[]
+  attendanceRecords  Attendance[]      @relation("AttendanceStudent")
+  attendanceMarked   Attendance[]      @relation("AttendanceMarker")
+  quizResults        QuizResult[]
+  learningProgress   LearningProgress[]
+  studySessions      StudySession[]
+  notifications      Notification[]
+
+  @@index([role, fullName])
+}
+
+model Course {
+  id          String            @id @default(cuid())
+  title       String
+  description String
+  subject     String
+  level       String
+  duration    Int
+  createdAt   DateTime          @default(now())
+  batches     Batch[]
+  lessons     Lesson[]
+  quizzes     Quiz[]
+  progress    LearningProgress[]
+
+  @@unique([title, subject, level])
+  @@index([subject, level])
+}
+
+model Batch {
+  id          String            @id @default(cuid())
+  name        String
+  description String
+  courseId    String
+  trainerId   String
+  startDate   DateTime
+  endDate     DateTime
+  status      BatchStatus       @default(PLANNED)
+  course      Course            @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  trainer     User              @relation("BatchTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+  enrollments Enrollment[]
+  assignments Assignment[]
+  attendance  Attendance[]
+  quizzes     Quiz[]
+
+  @@unique([name, courseId])
+  @@index([trainerId, status])
+  @@index([courseId, status])
+}
+
+model Enrollment {
+  id         String           @id @default(cuid())
+  studentId  String
+  batchId    String
+  enrolledAt DateTime         @default(now())
+  status     EnrollmentStatus @default(ACTIVE)
+  student    User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  batch      Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, batchId])
+  @@index([batchId, status])
+  @@index([studentId, status])
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  content     String   @db.Text
+  courseId    String
+  trainerId   String
+  order       Int
+  duration    Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  course      Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  trainer     User     @relation("LessonTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+
+  @@unique([courseId, order])
+  @@index([trainerId, courseId])
+}
+
+model Assignment {
+  id           String       @id @default(cuid())
+  title        String
+  description  String
+  instructions String       @db.Text
+  batchId      String
+  trainerId    String
+  dueDate      DateTime
+  totalMarks   Int
+  createdAt    DateTime     @default(now())
+  batch        Batch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  trainer      User         @relation("AssignmentTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+  submissions  Submission[]
+
+  @@index([batchId, dueDate])
+  @@index([trainerId, createdAt])
+  @@unique([batchId, title])
+}
+
+model Submission {
+  id                String           @id @default(cuid())
+  assignmentId      String
+  studentId         String
+  submissionContent String           @db.Text
+  submittedAt       DateTime         @default(now())
+  status            SubmissionStatus @default(SUBMITTED)
+  marks             Int?
+  feedback          String?          @db.Text
+  reviewedAt        DateTime?
+  assignment        Assignment       @relation(fields: [assignmentId], references: [id], onDelete: Cascade)
+  student           User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([assignmentId, studentId])
+  @@index([studentId, submittedAt])
+  @@index([assignmentId, status])
+}
+
+model Attendance {
+  id        String           @id @default(cuid())
+  studentId String
+  batchId   String
+  date      DateTime         @db.Date
+  status    AttendanceStatus
+  markedBy  String
+  student   User             @relation("AttendanceStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  batch     Batch            @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  marker    User             @relation("AttendanceMarker", fields: [markedBy], references: [id], onDelete: Restrict)
+
+  @@unique([studentId, batchId, date])
+  @@index([batchId, date])
+  @@index([studentId, date])
+}
+
+model Quiz {
+  id         String       @id @default(cuid())
+  title      String
+  courseId   String
+  batchId    String?
+  totalMarks Int
+  createdAt  DateTime     @default(now())
+  course     Course       @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  batch      Batch?       @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  results    QuizResult[]
+
+  @@index([courseId, createdAt])
+  @@index([batchId, createdAt])
+  @@unique([courseId, title])
+}
+
+model QuizResult {
+  id          String   @id @default(cuid())
+  quizId      String
+  studentId   String
+  score       Float
+  completedAt DateTime @default(now())
+  quiz        Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  student     User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([quizId, studentId])
+  @@index([studentId, completedAt])
+}
+
+model LearningProgress {
+  id                 String   @id @default(cuid())
+  studentId          String
+  courseId           String
+  completedLessons   Int      @default(0)
+  totalLessons       Int      @default(0)
+  progressPercentage Float    @default(0)
+  updatedAt          DateTime @updatedAt
+  student            User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  course             Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, courseId])
+  @@index([courseId, progressPercentage])
+}
+
+model StudySession {
+  id        String   @id @default(cuid())
+  studentId String
+  subject   String
+  title     String
+  startTime DateTime
+  endTime   DateTime
+  completed Boolean  @default(false)
+  createdAt DateTime @default(now())
+  student   User     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, startTime])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  message   String
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead, createdAt])
+}
