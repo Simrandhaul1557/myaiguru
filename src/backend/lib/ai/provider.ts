@@ -5,6 +5,10 @@ type ChatMessage = {
   content: string;
 };
 
+type AiRequestOptions = {
+  json?: boolean;
+};
+
 function getProviderConfig() {
   const apiKey = process.env.AI_API_KEY?.trim();
   const baseUrl = process.env.AI_API_BASE_URL?.trim();
@@ -42,7 +46,7 @@ function getProviderConfig() {
   };
 }
 
-export async function generateAiText(messages: ChatMessage[]) {
+export async function generateAiText(messages: ChatMessage[], options: AiRequestOptions = {}) {
   const { apiKey, model, endpoint } = getProviderConfig();
   let response: Response;
 
@@ -53,7 +57,12 @@ export async function generateAiText(messages: ChatMessage[]) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model, messages, temperature: 0.4 }),
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature: 0.4,
+        ...(options.json ? { response_format: { type: "json_object" } } : {}),
+      }),
       signal: AbortSignal.timeout(30_000),
       cache: "no-store",
     });

@@ -46,6 +46,7 @@ type TrainerAssignmentData = {
   assignments: Array<{
     id: string;
     title: string;
+    instructions: string;
     dueDate: string;
     totalMarks: number;
     batch: { id: string; name: string; course: { subject: string } };
@@ -61,6 +62,7 @@ type TrainerAssignmentData = {
   }>;
 };
 type TrainerBatchesData = { batches: Array<{ id: string; name: string; course: { id: string; subject: string; title: string } }> };
+type LessonQuizQuestion = { question: string; choices: [string, string, string, string]; answerIndex: number; explanation: string };
 type TrainerLessonsData = {
   lessons: Array<{ id: string; title: string; description: string; content: string; courseId: string; order: number; duration: number; course: { id: string; subject: string; title: string } }>;
 };
@@ -99,6 +101,26 @@ function readLessonMaterials(content: string): string[] {
     return [];
   }
   return [];
+}
+function readLessonQuiz(content: string): LessonQuizQuestion[] {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object" || !Array.isArray((parsed as Record<string, unknown>).quizDraft)) return [];
+    return (parsed as { quizDraft: unknown[] }).quizDraft.filter((item): item is LessonQuizQuestion => {
+      if (!item || typeof item !== "object") return false;
+      const question = item as Record<string, unknown>;
+      return typeof question.question === "string" &&
+        Array.isArray(question.choices) &&
+        question.choices.length === 4 &&
+        question.choices.every((choice) => typeof choice === "string") &&
+        Number.isInteger(question.answerIndex) &&
+        Number(question.answerIndex) >= 0 &&
+        Number(question.answerIndex) <= 3 &&
+        typeof question.explanation === "string";
+    });
+  } catch {
+    return [];
+  }
 }
 type TrainerStudentsData = {
   students: Array<{
@@ -325,11 +347,11 @@ function WelcomeCard({role, user, progress, learnerCount, toast}: {role:Role;use
   </Card>;
 }
 
-function InsightCard({role, onDetails, description, metric, loading=false}: {role:Role;onDetails:()=>void;description?:string;metric?:string;loading?:boolean}) {
+function InsightCard({role, onDetails, description, metric, loading=false, generated=false}: {role:Role;onDetails:()=>void;description?:string;metric?:string;loading?:boolean;generated?:boolean}) {
   return <motion.div whileHover={{y:-3}} className="relative min-h-[170px] overflow-hidden rounded-[20px] border border-white/60 bg-gradient-to-r from-[#f18b83] via-[#edbd70] to-[#a6dc55] p-5 text-white">
     <div className="absolute -right-10 -top-12 h-36 w-36 rounded-full bg-white/30 blur-3xl"/><div className="relative flex h-full flex-col">
         <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.1em] text-white/90"><span className="grid h-7 w-7 place-items-center rounded-full bg-white/25"><Sparkles size={14}/></span>{role==="student"?"AI suggestions":"Trainer insights"}</div>
-        <div className="mt-3 flex flex-1 items-end justify-between gap-1"><div className="min-w-0"><h3 className="text-[15px] font-semibold tracking-tight">Your next best step</h3><p className="mt-1 max-w-[190px] text-[10px] leading-4 text-white/90">{description??"Generate a personalized insight from your learning activity."}</p><button disabled={loading} onClick={onDetails} className="mt-3 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/90 px-2.5 py-1.5 text-[9px] font-semibold text-[#60634f] hover:bg-white disabled:cursor-wait disabled:opacity-70">{loading?"Thinking…":metric?"Refresh insight":"Generate insight"} <ArrowRight size={11}/></button></div><div className="shrink-0 pb-2 text-right"><Sparkles size={22} className="ml-auto"/><p className="mt-1 text-[11px] font-semibold leading-none">{metric??"AI"}</p><p className="mt-1 text-[8px] text-white/85">personalized</p></div></div>
+        <div className="mt-3 flex flex-1 items-end justify-between gap-1"><div className="min-w-0"><h3 className="text-[15px] font-semibold tracking-tight">Your next best step</h3><p className="mt-1 max-w-[190px] text-[10px] leading-4 text-white/90">{description??"Generate a personalized insight from your learning activity."}</p><button disabled={loading} onClick={onDetails} className="mt-3 flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-white/90 px-2.5 py-1.5 text-[9px] font-semibold text-[#60634f] hover:bg-white disabled:cursor-wait disabled:opacity-70">{loading?"Thinking…":generated?"Refresh insight":"Generate insight"} <ArrowRight size={11}/></button></div><div className="shrink-0 pb-2 text-right"><Sparkles size={22} className="ml-auto"/><p className="mt-1 text-[11px] font-semibold leading-none">{metric??"AI"}</p><p className="mt-1 text-[8px] text-white/85">personalized</p></div></div>
     </div>
   </motion.div>;
 }
@@ -402,7 +424,7 @@ function StudentDashboard({toast, user, onViewSubject, onViewAssignments}: {toas
     if(!item.sessionId){onViewAssignments();return;}
     try{const response=await fetch(`/api/student/sessions/${item.sessionId}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({completed:!item.done})});const result=await response.json();if(!response.ok)throw new Error(result.error?.message??"Could not update this study session.");toast("Study session updated.");refresh();}catch(reason){toast(reason instanceof Error?reason.message:"Could not update this study session.");}
   };
-  return <div className="space-y-5"><div className="grid items-start gap-4 md:grid-cols-[.91fr_1.09fr]"><div className="space-y-4"><LearningGoalCard user={user} progress={data.metrics.overallProgress} remainingDays={remainingDays} toast={toast}/><SubjectReadingCard studyBySubject={data.studyBySubject}/></div><div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><StudyHistory studyBySubject={data.studyBySubject} studyHours={data.metrics.studyHours} learningDays={data.metrics.learningDays}/><InsightCard role="student" onDetails={generateInsight} description={aiInsight||undefined} metric={aiInsight?"Ready":undefined} loading={insightLoading}/></div><PerformanceChart role="student" data={data.performanceTrend} seriesKeys={data.courses.map(course=>course.name)}/><div className="grid grid-cols-3 gap-3"><Metric label="Assignment completion" value={`${data.metrics.assignmentCompletion}%`} note="Reviewed work" icon={Target} tone="coral"/><Metric label="Attendance" value={`${data.metrics.attendance}%`} note="Present or on time" icon={Clock3}/><Metric label="Quiz average" value={`${data.metrics.quizAverage}%`} note="Completed assessments" icon={Zap} tone="yellow"/></div></div></div>
+  return <div className="space-y-5"><div className="grid items-start gap-4 md:grid-cols-[.91fr_1.09fr]"><div className="space-y-4"><LearningGoalCard user={user} progress={data.metrics.overallProgress} remainingDays={remainingDays} toast={toast}/><SubjectReadingCard studyBySubject={data.studyBySubject}/></div><div className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><StudyHistory studyBySubject={data.studyBySubject} studyHours={data.metrics.studyHours} learningDays={data.metrics.learningDays}/><InsightCard role="student" onDetails={generateInsight} description={aiInsight||undefined} metric={aiInsight?"Ready":undefined} loading={insightLoading} generated={Boolean(aiInsight)}/></div><PerformanceChart role="student" data={data.performanceTrend} seriesKeys={data.courses.map(course=>course.name)}/><div className="grid grid-cols-3 gap-3"><Metric label="Assignment completion" value={`${data.metrics.assignmentCompletion}%`} note="Reviewed work" icon={Target} tone="coral"/><Metric label="Attendance" value={`${data.metrics.attendance}%`} note="Present or on time" icon={Clock3}/><Metric label="Quiz average" value={`${data.metrics.quizAverage}%`} note="Completed assessments" icon={Zap} tone="yellow"/></div></div></div>
     <div><Heading title="My subjects" subtitle="Keep your momentum going"/><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{subjects.length?subjects.map((subject)=><SubjectCard key={subject.id} subject={subject} onView={()=>onViewSubject(subject.id)}/>):<Card className="py-8 text-center text-sm text-[#8c958e]">You are not enrolled in a course yet.</Card>}</div></div>
     <ActivityList items={activities} onToggle={toggle} filter={filter} setFilter={setFilter}/>
   </div>;
@@ -410,13 +432,29 @@ function StudentDashboard({toast, user, onViewSubject, onViewAssignments}: {toas
 
 function TrainerDashboard({toast, user, onViewBatch, onViewAssignments}: {toast:(s:string)=>void;user:string;onViewBatch:(id?:string)=>void;onViewAssignments:()=>void}) {
   const {data,error,loading,refresh}=useApiResource<TrainerDashboardData>("/api/trainer/dashboard");
+  const [aiInsight,setAiInsight]=useState("");
+  const [insightLoading,setInsightLoading]=useState(false);
+  async function generateTrainerInsight() {
+    if(insightLoading)return;
+    setInsightLoading(true);
+    try {
+      const response=await fetch("/api/trainer/ai-assist",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:"insight"})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error?.message??"Could not generate a trainer insight.");
+      setAiInsight(`${result.insight} ${result.nextStep}`);
+    } catch(reason) {
+      toast(reason instanceof Error?reason.message:"Could not generate a trainer insight.");
+    } finally {
+      setInsightLoading(false);
+    }
+  }
   if(loading||error||!data)return <ApiState loading={loading} error={error||"Dashboard data is not available."} onRetry={refresh}/>;
   const distribution=data.learnerDistribution;
   const progressPercent=distribution.total?Math.round(distribution.onTrack/distribution.total*100):0;
   return <div className="space-y-5"><WelcomeCard role="trainer" user={user} progress={data.metrics.averageAssessment} learnerCount={data.metrics.learners} toast={toast}/>
     <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric label="Total learners" value={String(data.metrics.learners)} note={`Across ${data.metrics.activeBatches} active batches`} icon={Users}/><Metric label="Average attendance" value={`${data.metrics.attendance}%`} note="Present or on time" icon={CalendarDays} tone="peach"/><Metric label="Submission rate" value={`${data.metrics.submissionRate}%`} note="Reviewed submissions" icon={FileText} tone="yellow"/><Metric label="Reviews to complete" value={String(data.metrics.pendingReviews)} note="Submitted work awaiting review" icon={Clock3} tone="coral"/></div>
     <div className="grid gap-5 lg:grid-cols-[1.4fr_.8fr]"><PerformanceChart role="trainer" data={data.performanceTrend} seriesKeys={data.batches.map(batch=>batch.name)}/><Card><Heading title="Learner snapshot" subtitle="A quick read across your classes"/><div className="grid grid-cols-2 gap-3">{[["High performers",String(distribution.highPerformers),"bg-[#eaf2e6]"],["Need support",String(distribution.needsSupport),"bg-[#fff0e5]"],["Avg. assessment",`${data.metrics.averageAssessment}%`,"bg-[#fbf2d8]"],["On track",`${progressPercent}%`,"bg-[#eaf0f6]"]].map(([label,value,bg])=><div key={label} className={cx("rounded-2xl p-4",bg)}><p className="text-[11px] text-[#77827a]">{label}</p><p className="mt-2 text-2xl font-semibold">{value}</p></div>)}</div><div className="mt-5"><p className="mb-3 text-xs font-medium text-[#647068]">Progress distribution</p><div className="flex h-2.5 overflow-hidden rounded-full bg-[#f0f2ed]"><div className="bg-[#80a981]" style={{width:`${progressPercent}%`}}/><div className="bg-[#e5bf70]" style={{width:`${distribution.total?Math.round(distribution.needsSupport/distribution.total*100):0}%`}}/></div><div className="mt-2 flex justify-between text-[10px] text-[#929b94]"><span>On track · {progressPercent}%</span><span>Needs support · {distribution.total?Math.round(distribution.needsSupport/distribution.total*100):0}%</span></div></div></Card></div>
-    <div className="grid gap-5 lg:grid-cols-[.8fr_1.2fr]"><InsightCard role="trainer" metric={String(distribution.needsSupport)} description={`${distribution.needsSupport} learners are below 60% progress and may benefit from additional support.`} onDetails={()=>onViewBatch()}/><Card><Heading title="Assignment reviews" subtitle="Recently submitted work" action={<Button onClick={onViewAssignments}>View all <ArrowRight size={13}/></Button>}/><div className="divide-y divide-[#eff1ed]">{data.recentSubmissions.length?data.recentSubmissions.slice(0,3).map((submission,index)=><div key={submission.id} className="flex items-center gap-3 py-3"><span className={cx("grid h-9 w-9 place-items-center rounded-xl",["bg-[#eaf2e6] text-[#61835f]","bg-[#fff0e5] text-[#b77d5f]","bg-[#fbf2d8] text-[#9b833e]"][index%3])}><FileText size={16}/></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{submission.title}</p><p className="mt-1 text-[10px] text-[#949d96]">{submission.student} · {submission.batch}</p></div><Button onClick={onViewAssignments}>Review</Button></div>):<p className="py-6 text-center text-xs text-[#929b94]">No submissions yet.</p>}</div></Card></div>
+    <div className="grid gap-5 lg:grid-cols-[.8fr_1.2fr]"><InsightCard role="trainer" metric={aiInsight?"AI":String(distribution.needsSupport)} description={aiInsight||`${distribution.needsSupport} learners are below 60% progress and may benefit from additional support.`} onDetails={generateTrainerInsight} loading={insightLoading} generated={Boolean(aiInsight)}/><Card><Heading title="Assignment reviews" subtitle="Recently submitted work" action={<Button onClick={onViewAssignments}>View all <ArrowRight size={13}/></Button>}/><div className="divide-y divide-[#eff1ed]">{data.recentSubmissions.length?data.recentSubmissions.slice(0,3).map((submission,index)=><div key={submission.id} className="flex items-center gap-3 py-3"><span className={cx("grid h-9 w-9 place-items-center rounded-xl",["bg-[#eaf2e6] text-[#61835f]","bg-[#fff0e5] text-[#b77d5f]","bg-[#fbf2d8] text-[#9b833e]"][index%3])}><FileText size={16}/></span><div className="min-w-0 flex-1"><p className="truncate text-xs font-semibold">{submission.title}</p><p className="mt-1 text-[10px] text-[#949d96]">{submission.student} · {submission.batch}</p></div><Button onClick={onViewAssignments}>Review</Button></div>):<p className="py-6 text-center text-xs text-[#929b94]">No submissions yet.</p>}</div></Card></div>
     <div><Heading title="Your batches" subtitle="A little overview of your learning communities"/><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{data.batches.map((batch,index)=><motion.div key={batch.id} whileHover={{y:-3}} className="card p-5"><div className="flex items-start justify-between"><span className={cx("grid h-10 w-10 place-items-center rounded-xl",["bg-[#eaf2e6] text-[#61835f]","bg-[#fff0e5] text-[#b77d5f]","bg-[#fbf2d8] text-[#9b833e]","bg-[#fbeae5] text-[#b97565]"][index%4])}><Users size={17}/></span><span className="rounded-full bg-[#f4f6f2] px-2.5 py-1 text-[10px] text-[#7d887f]">{batch.learners} learners</span></div><h3 className="mt-4 text-sm font-semibold">{batch.name}</h3><p className="mt-1 text-[10px] text-[#909a92]">{batch.subject}</p><div className="mt-4 grid grid-cols-2 gap-3"><div><p className="text-[10px] text-[#9aa29b]">Attendance</p><p className="mt-1 text-lg font-semibold">{batch.attendance}%</p></div><div><p className="text-[10px] text-[#9aa29b]">Avg. score</p><p className="mt-1 text-lg font-semibold">{batch.score}%</p></div></div><p className="mt-4 border-t border-[#eff1ed] pt-3 text-[10px] text-[#8f9891]">Course end · {new Date(batch.endDate).toLocaleDateString()}</p><Button className="mt-3 w-full" onClick={()=>onViewBatch(batch.id)}>View batch <ArrowRight size={13}/></Button></motion.div>)}</div></div>
   </div>;
 }
@@ -590,21 +628,35 @@ function AssignmentsPage({toast}: {toast:(s:string)=>void}) {
   const {data,error,loading,refresh}=useApiResource<TrainerAssignmentData>("/api/trainer/assignments");
   const {data:batchesData}=useApiResource<TrainerBatchesData>("/api/trainer/batches");
   const [filter,setFilter]=useState("All");
-  const [selected,setSelected]=useState<(TrainerAssignmentData["assignments"][number]["submissions"][number]&{assignmentTitle:string;subject:string;batch:string;totalMarks:number})|null>(null);
+  const [selected,setSelected]=useState<(TrainerAssignmentData["assignments"][number]["submissions"][number]&{assignmentTitle:string;assignmentInstructions:string;subject:string;batch:string;totalMarks:number})|null>(null);
   const [marks,setMarks]=useState("");
   const [feedback,setFeedback]=useState("");
+  const [aiFeedbackConsent,setAiFeedbackConsent]=useState(false);
+  const [aiFeedbackLoading,setAiFeedbackLoading]=useState(false);
   const [createOpen,setCreateOpen]=useState(false);
   const [saving,setSaving]=useState(false);
   const [newAssignment,setNewAssignment]=useState({title:"",description:"",instructions:"",batchId:"",dueDate:"",totalMarks:"20"});
   const rows=data?.assignments.flatMap(assignment=>assignment.submissions.map(submission=>({
-    ...submission,assignmentTitle:assignment.title,subject:assignment.batch.course.subject,batch:assignment.batch.name,totalMarks:assignment.totalMarks,
+    ...submission,assignmentTitle:assignment.title,assignmentInstructions:assignment.instructions,subject:assignment.batch.course.subject,batch:assignment.batch.name,totalMarks:assignment.totalMarks,
   })))??[];
   const visible=rows.filter(row=>filter==="All"||(filter==="Pending"?row.status==="SUBMITTED":row.status==="REVIEWED"));
   const pending=rows.filter(row=>row.status==="SUBMITTED").length;
   const reviewed=rows.filter(row=>row.status==="REVIEWED").length;
   const weekStart=Date.now()-7*86400000;
   const thisWeek=rows.filter(row=>new Date(row.submittedAt).getTime()>=weekStart).length;
-  function openReview(row:typeof rows[number]){setSelected(row);setMarks(row.marks===null?"":String(row.marks));setFeedback(row.feedback??"");}
+  function openReview(row:typeof rows[number]){setSelected(row);setMarks(row.marks===null?"":String(row.marks));setFeedback(row.feedback??"");setAiFeedbackConsent(false);}
+  async function draftAiFeedback(){
+    if(!selected||!aiFeedbackConsent||aiFeedbackLoading)return;
+    setAiFeedbackLoading(true);
+    try{
+      const response=await fetch("/api/trainer/ai-assist",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task:"feedback",assignmentTitle:selected.assignmentTitle,instructions:selected.assignmentInstructions,submissionContent:selected.submissionContent})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error?.message??"Could not draft AI feedback.");
+      setFeedback(result.suggestedComment);
+      toast("AI feedback draft added. Review and edit it before publishing.");
+    }catch(reason){toast(reason instanceof Error?reason.message:"Could not draft AI feedback.");}
+    finally{setAiFeedbackLoading(false);}
+  }
   async function publishReview(){
     if(!selected)return;
     const markValue=Number(marks);
@@ -636,7 +688,7 @@ function AssignmentsPage({toast}: {toast:(s:string)=>void}) {
   }
   if(loading||error||!data)return <ApiState loading={loading} error={error||"Assignment data is not available."} onRetry={refresh}/>;
   return <div className="space-y-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.12em] text-[#789073]">Thoughtful feedback makes a difference</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.04em]">Assignments</h1><p className="mt-2 text-sm text-[#87918a]">Review student work and share helpful next steps.</p></div><Button variant="primary" onClick={()=>setCreateOpen(true)}><Plus size={15}/> Create assignment</Button></div><div className="grid gap-4 sm:grid-cols-3"><Metric label="To review" value={String(pending)} icon={Clock3} tone="peach"/><Metric label="Reviewed" value={String(reviewed)} icon={CheckCircle2}/><Metric label="Submitted this week" value={String(thisWeek)} icon={FileText} tone="yellow"/></div><Card><div className="mb-5 flex flex-wrap items-center justify-between gap-3"><Heading title="Student submissions" subtitle="Your inbox for work to review"/><Selector items={["All","Pending","Reviewed"]} value={filter} onChange={setFilter}/></div><div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left"><thead><tr className="border-b border-[#eff1ed] text-[10px] uppercase tracking-wide text-[#9aa29b]"><th className="pb-3 font-medium">Assignment</th><th className="pb-3 font-medium">Student</th><th className="pb-3 font-medium">Batch</th><th className="pb-3 font-medium">Submitted</th><th className="pb-3 font-medium">Status</th><th className="pb-3"/></tr></thead><tbody>{visible.map(row=><tr key={row.id} className="border-b border-[#f1f3ef] last:border-0"><td className="py-4"><p className="text-xs font-semibold">{row.assignmentTitle}</p><p className="mt-1 text-[10px] text-[#98a199]">{row.subject}</p></td><td className="py-4 text-xs">{row.student.fullName}</td><td className="py-4 text-xs text-[#758078]">{row.batch}</td><td className="py-4 text-xs text-[#87918a]">{new Date(row.submittedAt).toLocaleDateString()}</td><td className="py-4"><span className={cx("rounded-full px-2.5 py-1 text-[10px]",row.status==="SUBMITTED"?"bg-[#fff1e9] text-[#b77b5c]":"bg-[#edf4e9] text-[#63805f]")}>{row.status==="SUBMITTED"?"Pending":"Reviewed"}</span></td><td className="py-4"><Button onClick={()=>openReview(row)}>{row.status==="SUBMITTED"?"Review":"View"}</Button></td></tr>)}</tbody></table>{!visible.length&&<p className="py-10 text-center text-sm text-[#909a92]">No submissions match this filter.</p>}</div></Card>
-    {selected&&<AppModal title="Review submission" onClose={()=>setSelected(null)} footer={<Button variant="primary" disabled={saving} onClick={()=>void publishReview()}>{saving?"Publishing…":"Publish feedback"}</Button>}><div className="rounded-xl bg-[#f6f8f4] p-4"><p className="text-sm font-semibold">{selected.assignmentTitle}</p><p className="mt-1 text-xs text-[#8b958d]">{selected.student.fullName} · {selected.batch} · {selected.subject}</p><p className="mt-1 text-[10px] text-[#8b958d]">Submitted {new Date(selected.submittedAt).toLocaleString()}</p><div className="mt-4 rounded-lg border border-[#eaeee7] bg-white p-3"><p className="text-[10px] font-semibold uppercase tracking-wide text-[#929b94]">Student submission</p><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[#758078]">{selected.submissionContent}</p></div></div><div className="mt-4 grid grid-cols-[120px_1fr] items-center gap-3"><label htmlFor="marks" className="text-xs font-medium">Marks (out of {selected.totalMarks})</label><input id="marks" type="number" min="0" max={selected.totalMarks} step="1" value={marks} onChange={e=>setMarks(e.target.value)} placeholder="e.g. 18" className="field"/></div><label className="mt-4 block text-xs font-medium">Feedback<textarea value={feedback} onChange={e=>setFeedback(e.target.value)} rows={4} placeholder="Share a helpful comment..." className="field mt-1.5 resize-y"/></label></AppModal>}
+    {selected&&<AppModal title="Review submission" onClose={()=>setSelected(null)} footer={<Button variant="primary" disabled={saving} onClick={()=>void publishReview()}>{saving?"Publishing…":"Publish feedback"}</Button>}><div className="rounded-xl bg-[#f6f8f4] p-4"><p className="text-sm font-semibold">{selected.assignmentTitle}</p><p className="mt-1 text-xs text-[#8b958d]">{selected.student.fullName} · {selected.batch} · {selected.subject}</p><p className="mt-1 text-[10px] text-[#8b958d]">Submitted {new Date(selected.submittedAt).toLocaleString()}</p><div className="mt-4 rounded-lg border border-[#eaeee7] bg-white p-3"><p className="text-[10px] font-semibold uppercase tracking-wide text-[#929b94]">Student submission</p><p className="mt-2 whitespace-pre-wrap text-xs leading-5 text-[#758078]">{selected.submissionContent}</p></div></div><div className="mt-4 grid grid-cols-[120px_1fr] items-center gap-3"><label htmlFor="marks" className="text-xs font-medium">Marks (out of {selected.totalMarks})</label><input id="marks" type="number" min="0" max={selected.totalMarks} step="1" value={marks} onChange={e=>setMarks(e.target.value)} placeholder="e.g. 18" className="field"/></div><label className="mt-4 block text-xs font-medium">Feedback<textarea value={feedback} onChange={e=>setFeedback(e.target.value)} rows={4} placeholder="Share a helpful comment..." className="field mt-1.5 resize-y"/></label><div className="mt-3 rounded-xl bg-[#f7f8f4] p-3"><p className="text-[10px] leading-4 text-[#7b877e]">AI feedback sends the assignment instructions and submission text to your configured AI provider. Remove names and contact details first. AI does not assign marks; you must review and edit its draft.</p><label className="mt-2 flex items-start gap-2 text-[10px] leading-4 text-[#647068]"><input type="checkbox" checked={aiFeedbackConsent} onChange={event=>setAiFeedbackConsent(event.target.checked)} className="mt-0.5"/><span>I have removed personal details and want to generate a feedback draft.</span></label><Button className="mt-3" disabled={!aiFeedbackConsent||aiFeedbackLoading} onClick={()=>void draftAiFeedback()}>{aiFeedbackLoading?"Drafting…":"Draft feedback with AI"} <Sparkles size={14}/></Button></div></AppModal>}
     {createOpen&&<AppModal title="Create assignment" onClose={()=>setCreateOpen(false)} footer={<><Button onClick={()=>setCreateOpen(false)}>Cancel</Button><Button variant="primary" disabled={saving} onClick={()=>void createAssignment()}>{saving?"Saving…":"Create assignment"}</Button></>}><div className="space-y-3"><label className="block text-xs font-medium">Assignment title<input value={newAssignment.title} onChange={e=>setNewAssignment({...newAssignment,title:e.target.value})} className="field mt-1.5"/></label><label className="block text-xs font-medium">Batch<select value={newAssignment.batchId} onChange={e=>setNewAssignment({...newAssignment,batchId:e.target.value})} className="field mt-1.5"><option value="">Select a batch</option>{(batchesData?.batches??[]).map(batch=><option key={batch.id} value={batch.id}>{batch.name}</option>)}</select></label><label className="block text-xs font-medium">Description<textarea value={newAssignment.description} onChange={e=>setNewAssignment({...newAssignment,description:e.target.value})} rows={2} className="field mt-1.5"/></label><label className="block text-xs font-medium">Instructions<textarea value={newAssignment.instructions} onChange={e=>setNewAssignment({...newAssignment,instructions:e.target.value})} rows={3} className="field mt-1.5"/></label><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium">Due date<input type="datetime-local" value={newAssignment.dueDate} onChange={e=>setNewAssignment({...newAssignment,dueDate:e.target.value})} className="field mt-1.5"/></label><label className="text-xs font-medium">Total marks<input type="number" min="1" value={newAssignment.totalMarks} onChange={e=>setNewAssignment({...newAssignment,totalMarks:e.target.value})} className="field mt-1.5"/></label></div></div></AppModal>}
   </div>;
 }
@@ -679,17 +731,52 @@ function LessonsPage({toast}: {toast:(s:string)=>void}) {
   });
   const {title,subject,topic,level,objectives,outline}=draft;
   const [materials,setMaterials]=usePersistedState("myaiguru-lesson-materials",["Worked example sheet","Practice: factorising expressions","Exit ticket — one-minute reflection"]);
+  const [quizDraft,setQuizDraft]=useState<LessonQuizQuestion[]>([]);
   const [saved,setSavedState]=useState(true);
   const [preview,setPreview]=useState(false);
   const [selectedLessonId,setSelectedLessonId]=useState("");
   const [saving,setSaving]=useState(false);
+  const [aiBusy,setAiBusy]=useState<"lesson"|"quiz"|null>(null);
   useEffect(()=>{
     const lesson=lessonData?.lessons[0];
     if(!lesson||selectedLessonId)return;
     setSelectedLessonId(lesson.id);
     setDraft(readLessonDraft(lesson));
     setMaterials(readLessonMaterials(lesson.content));
+    setQuizDraft(readLessonQuiz(lesson.content));
   },[lessonData,selectedLessonId,setDraft,setMaterials]);
+  async function generateAiDraft(task:"lesson"|"quiz"){
+    if(aiBusy)return;
+    setAiBusy(task);
+    try{
+      const response=await fetch("/api/trainer/ai-assist",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({task,title,subject,topic,level,objectives,questionCount:5})});
+      const result=await response.json();
+      if(!response.ok)throw new Error(result.error?.message??"Could not generate an AI draft.");
+      if(task==="lesson"){
+        setDraft({...draft,objectives:result.objectives.join("\n"),outline:result.outline.map((item:string,index:number)=>`${index+1}. ${item}`).join("\n")});
+        setMaterials(current=>[...new Set([...current,...result.materials])]);
+        toast("Lesson draft generated. Review it before saving or teaching.");
+      }else{
+        setQuizDraft(result.questions);
+        toast("Quiz draft generated. Check every answer before sharing it.");
+      }
+      setSavedState(false);
+    }catch(reason){toast(reason instanceof Error?reason.message:"Could not generate an AI draft.");}
+    finally{setAiBusy(null);}
+  }
+  function updateQuizQuestion(index:number, update:Partial<LessonQuizQuestion>){
+    setQuizDraft(current=>current.map((question,questionIndex)=>questionIndex===index?{...question,...update}:question));
+    setSavedState(false);
+  }
+  function updateQuizChoice(questionIndex:number,choiceIndex:number,value:string){
+    setQuizDraft(current=>current.map((question,index)=>{
+      if(index!==questionIndex)return question;
+      const choices:LessonQuizQuestion["choices"]=[...question.choices];
+      choices[choiceIndex]=value;
+      return {...question,choices};
+    }));
+    setSavedState(false);
+  }
   async function saveLesson(){
     const course=batchData?.batches.find(batch=>batch.course.subject===draft.subject)?.course;
     if(!course){toast("No matching course is available in your assigned batches.");return;}
@@ -702,7 +789,7 @@ function LessonsPage({toast}: {toast:(s:string)=>void}) {
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
           title:draft.title,description:draft.topic||draft.title,
-          content:JSON.stringify({objectives:draft.objectives,outline:draft.outline,materials,level:draft.level}),
+          content:JSON.stringify({objectives:draft.objectives,outline:draft.outline,materials,level:draft.level,quizDraft}),
           courseId:course.id,order:existing?.order??(lessonData?.lessons.filter(lesson=>lesson.courseId===course.id).length??0)+1,
           duration:existing?.duration??45,
         }),
@@ -718,8 +805,10 @@ function LessonsPage({toast}: {toast:(s:string)=>void}) {
   }
   function setSaved(value:boolean){if(value)void saveLesson();else setSavedState(false);}
   function edit(field:"title"|"topic"|"objectives"|"outline"){return (e:React.ChangeEvent<HTMLInputElement|HTMLTextAreaElement>)=>{setDraft({...draft,[field]:e.target.value});setSaved(false);};}
-  return <div className="space-y-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.12em] text-[#789073]">Plan a thoughtful learning moment</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.04em]">Lesson planner</h1><p className="mt-2 text-sm text-[#87918a]">Shape a lesson that meets your learners where they are.</p></div><div className="flex gap-2"><Button onClick={()=>setSaved(true)}>{saving?"Saving…":saved?<><Check size={14}/> Saved</>:<><FileText size={14}/> Save draft</>}</Button><Button variant="primary" onClick={()=>setPreview(true)}>Preview lesson <ArrowRight size={14}/></Button></div></div>
-    <div className="grid gap-5 lg:grid-cols-[.85fr_1.15fr]"><div className="space-y-5"><Card><Heading title="Lesson details" subtitle="Start with the essentials"/><label className="mb-4 block text-xs font-medium">Lesson title<input value={title} onChange={edit("title")} className="field mt-1.5"/></label><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium">Subject<select value={subject} onChange={e=>{setDraft({...draft,subject:e.target.value});setSaved(false);}} className="field mt-1.5">{studentSubjects.map(s=><option key={s.id}>{s.name}</option>)}</select></label><label className="text-xs font-medium">Learner level<select value={level} onChange={e=>{setDraft({...draft,level:e.target.value});setSaved(false);}} className="field mt-1.5">{["Foundations","Intermediate","Advanced"].map(s=><option key={s}>{s}</option>)}</select></label></div><label className="mt-4 block text-xs font-medium">Topic<input value={topic} onChange={edit("topic")} className="field mt-1.5"/></label></Card><Card><Heading title="Learning objectives" subtitle="What will learners be able to do?"/><textarea rows={5} value={objectives} onChange={edit("objectives")} className="field resize-y leading-6"/></Card></div><div className="space-y-5"><Card><Heading title="Lesson outline" subtitle="Keep the flow clear and engaging"/><textarea rows={12} value={outline} onChange={edit("outline")} className="field resize-y leading-7"/></Card><Card><Heading title="Learning materials" subtitle="Helpful supporting resources"/>{materials.map((item,i)=><div key={item} className="flex items-center gap-3 border-b border-[#eff1ed] py-3 last:border-0"><span className={cx("grid h-8 w-8 place-items-center rounded-lg",i===0?"bg-[#eaf2e6] text-[#60815c]":"bg-[#fff0e5] text-[#b77d5f]")}><FileText size={15}/></span><span className="flex-1 text-xs font-medium">{item}</span><button aria-label={`Remove ${item}`} onClick={()=>{setMaterials(materials.filter(material=>material!==item));setSaved(false);}} className="text-[#a2aaa3] hover:text-[#b97565]"><X size={14}/></button></div>)}<Button className="mt-3 w-full" onClick={()=>{setMaterials([...materials,`New learning material ${materials.length+1}`]);setSaved(false);}}><Plus size={14}/> Add material</Button></Card></div></div>
+  return <div className="space-y-5"><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-[.12em] text-[#789073]">Plan a thoughtful learning moment</p><h1 className="mt-2 text-3xl font-semibold tracking-[-.04em]">Lesson planner</h1><p className="mt-2 text-sm text-[#87918a]">Shape a lesson that meets your learners where they are.</p></div><div className="flex flex-wrap gap-2"><Button disabled={aiBusy!==null} onClick={()=>void generateAiDraft("lesson")}>{aiBusy==="lesson"?"Drafting…":"Draft lesson with AI"} <Sparkles size={14}/></Button><Button disabled={aiBusy!==null} onClick={()=>void generateAiDraft("quiz")}>{aiBusy==="quiz"?"Creating…":"Create quiz draft"} <Sparkles size={14}/></Button><Button onClick={()=>setSaved(true)}>{saving?"Saving…":saved?<><Check size={14}/> Saved</>:<><FileText size={14}/> Save draft</>}</Button><Button variant="primary" onClick={()=>setPreview(true)}>Preview lesson <ArrowRight size={14}/></Button></div></div>
+    <p className="rounded-xl bg-[#f7f8f4] px-4 py-3 text-xs leading-5 text-[#77827e]">AI-generated lesson and quiz content is a draft only. Review accuracy, age suitability, and answer keys before saving or using it with learners.</p>
+    <div className="grid gap-5 lg:grid-cols-[.85fr_1.15fr]"><div className="space-y-5"><Card><Heading title="Lesson details" subtitle="Start with the essentials"/><label className="mb-4 block text-xs font-medium">Lesson title<input value={title} onChange={edit("title")} className="field mt-1.5"/></label><div className="grid grid-cols-2 gap-3"><label className="text-xs font-medium">Subject<select value={subject} onChange={e=>{setDraft({...draft,subject:e.target.value});setSaved(false);}} className="field mt-1.5">{studentSubjects.map(s=><option key={s.id}>{s.name}</option>)}</select></label><label className="text-xs font-medium">Learner level<select value={level} onChange={e=>{setDraft({...draft,level:e.target.value});setSaved(false);}} className="field mt-1.5">{["Foundations","Intermediate","Advanced"].map(s=><option key={s}>{s}</option>)}</select></label></div><label className="mt-4 block text-xs font-medium">Topic<input value={topic} onChange={edit("topic")} className="field mt-1.5"/></label></Card><Card><Heading title="Learning objectives" subtitle="What will learners be able to do?"/><textarea rows={5} value={objectives} onChange={edit("objectives")} className="field resize-y leading-6"/></Card></div><div className="space-y-5"><Card><Heading title="Lesson outline" subtitle="Keep the flow clear and engaging"/><textarea rows={12} value={outline} onChange={edit("outline")} className="field resize-y leading-7"/></Card><Card><Heading title="Learning materials" subtitle="Helpful supporting resources"/>{materials.map((item,i)=><div key={`${item}-${i}`} className="flex items-center gap-3 border-b border-[#eff1ed] py-3 last:border-0"><span className={cx("grid h-8 w-8 place-items-center rounded-lg",i===0?"bg-[#eaf2e6] text-[#60815c]":"bg-[#fff0e5] text-[#b77d5f]")}><FileText size={15}/></span><span className="flex-1 text-xs font-medium">{item}</span><button aria-label={`Remove ${item}`} onClick={()=>{setMaterials(materials.filter((_,index)=>index!==i));setSaved(false);}} className="text-[#a2aaa3] hover:text-[#b97565]"><X size={14}/></button></div>)}<Button className="mt-3 w-full" onClick={()=>{setMaterials([...materials,`New learning material ${materials.length+1}`]);setSaved(false);}}><Plus size={14}/> Add material</Button></Card>
+      <Card><Heading title="Quiz draft" subtitle="Edit every question and answer before use"/>{quizDraft.length?<div className="space-y-4">{quizDraft.map((question,index)=><div key={index} className="rounded-xl bg-[#f7f8f4] p-4"><div className="flex items-start gap-3"><label className="flex-1 text-[10px] font-medium text-[#758078]">Question {index+1}<textarea value={question.question} onChange={event=>updateQuizQuestion(index,{question:event.target.value})} rows={2} className="field mt-1.5"/></label><button aria-label={`Remove question ${index+1}`} onClick={()=>{setQuizDraft(quizDraft.filter((_,questionIndex)=>questionIndex!==index));setSaved(false);}} className="mt-5 text-[#a2aaa3] hover:text-[#b97565]"><X size={14}/></button></div><div className="mt-3 grid gap-2 sm:grid-cols-2">{question.choices.map((choice,choiceIndex)=><label key={choiceIndex} className="text-[10px] font-medium text-[#758078]">Choice {String.fromCharCode(65+choiceIndex)}<input value={choice} onChange={event=>updateQuizChoice(index,choiceIndex,event.target.value)} className="field mt-1"/></label>)}</div><label className="mt-3 block text-[10px] font-medium text-[#758078]">Suggested correct answer<select value={question.answerIndex} onChange={event=>updateQuizQuestion(index,{answerIndex:Number(event.target.value)})} className="field mt-1"><option value={0}>A</option><option value={1}>B</option><option value={2}>C</option><option value={3}>D</option></select></label><label className="mt-3 block text-[10px] font-medium text-[#758078]">Explanation<textarea value={question.explanation} onChange={event=>updateQuizQuestion(index,{explanation:event.target.value})} rows={2} className="field mt-1"/></label></div>)}</div>:<p className="text-xs text-[#89938b]">No quiz questions yet. Generate a draft to review and save with this lesson.</p>}</Card></div></div>
     {preview&&<AppModal title="Lesson preview" onClose={()=>setPreview(false)} footer={<Button variant="primary" onClick={()=>setPreview(false)}>Looks good</Button>}><div className="rounded-2xl bg-gradient-to-br from-[#edf4e5] to-[#f7e9dc] p-5"><p className="text-[10px] font-semibold uppercase tracking-[.12em] text-[#71856a]">{subject} · {level}</p><h2 className="mt-2 text-xl font-semibold">{title}</h2><p className="mt-1 text-xs text-[#7f8a7c]">{topic}</p></div><h3 className="mt-5 text-sm font-semibold">Learning objectives</h3><p className="mt-2 whitespace-pre-line text-xs leading-6 text-[#758078]">{objectives}</p><h3 className="mt-4 text-sm font-semibold">Lesson outline</h3><p className="mt-2 whitespace-pre-line text-xs leading-6 text-[#758078]">{outline}</p></AppModal>}
   </div>;
 }

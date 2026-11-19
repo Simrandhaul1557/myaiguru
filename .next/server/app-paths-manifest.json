@@ -1,3 +1,10 @@
 {
-  "/login/page": "app/login/page.js"
+  "/api/me/route": "app/api/me/route.js",
+  "/api/me/notifications/route": "app/api/me/notifications/route.js",
+  "/api/student/[...path]/route": "app/api/student/[...path]/route.js",
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/api/trainer/[...path]/route": "app/api/trainer/[...path]/route.js",
+  "/api/trainer/ai-assist/route": "app/api/trainer/ai-assist/route.js",
+  "/login/page": "app/login/page.js",
+  "/[role]/[section]/page": "app/[role]/[section]/page.js"
 }
